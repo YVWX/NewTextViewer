@@ -1,0 +1,1 @@
+The use of the app does not require network access. No data transferred online. The app does not modify local files.
