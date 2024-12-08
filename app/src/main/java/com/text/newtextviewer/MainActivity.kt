@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.text.isDigitsOnly
@@ -63,12 +65,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.text.newtextviewer.ui.theme.NewTextViewerTheme
 import kotlinx.coroutines.launch
 
-// There can be a glitch of LazyColumn with long text
-const val CHUNK_SIZE = 16384
+const val CHUNK_SIZE = 65536
 
-const val KEYWORD_LENGTH = 128
+const val KEYWORD_LENGTH = 256
 
-const val WRAP_LENGTH = 128
+const val WRAP_LENGTH = 256
 
 val CHARSETS = arrayOf(
     Charsets.ISO_8859_1,
@@ -449,7 +450,6 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                             onClick = {
                                 viewModel.charsetFlag = false
                                 viewModel.fileReadInfo[viewModel.currentFileIndex].charset = item
-                                // to avoid a glitch of LazyColumn with long text
                                 viewModel.gotoLine = 0
                                 readTextFlag = true
                             },
@@ -669,17 +669,23 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                 expandEnable = false
                                 viewModel.expandedList[index] = true
                             }
-                            Row {
+                            var textModifier = Modifier
+                                .defaultMinSize(
+                                    configuration.screenWidthDp.dp,
+                                    50.dp
+                                )
+                            if (viewModel.expandedList[index]) {
+                                textModifier = textModifier.width(configuration.screenWidthDp.dp)
+                            }
+                            Row(
+                                modifier = textModifier
+                            ) {
+                                LineLeadingIcon(
+                                    index,
+                                    expandEnable,
+                                    viewModel
+                                )
                                 Box {
-                                    var textModifier = Modifier
-                                        .defaultMinSize(
-                                            configuration.screenWidthDp.dp,
-                                            50.dp
-                                        )
-                                        .wrapContentHeight()
-                                    if (viewModel.expandedList[index]) {
-                                        textModifier = textModifier.width(configuration.screenWidthDp.dp)
-                                    }
                                     if (viewModel.findKeywordStart.line == viewModel.baseLineNumber + index) {
                                         val endOffset = viewModel.findKeywordStart.offset + viewModel.findKeywordInfo.keyword.length - 1
                                         val keywordLine = TextFieldValue(
@@ -689,33 +695,28 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                                 endOffset + 1
                                             )
                                         )
-                                        TextField(
+                                        BasicTextField(
                                             value = keywordLine,
                                             onValueChange = {},
-                                            leadingIcon = {
-                                                LineLeadingIcon(
-                                                    index,
-                                                    expandEnable,
-                                                    viewModel
-                                                )
-                                            },
                                             readOnly = true,
-                                            modifier = textModifier
+                                            modifier = Modifier
+                                                .defaultMinSize(
+                                                    Dp.Unspecified,
+                                                    50.dp
+                                                )
+                                                .wrapContentHeight()
                                         )
-                                    }
-                                    else {
-                                        TextField(
+                                    } else {
+                                        BasicTextField(
                                             value = item,
                                             onValueChange = {},
-                                            leadingIcon = {
-                                                LineLeadingIcon(
-                                                    index,
-                                                    expandEnable,
-                                                    viewModel
-                                                )
-                                            },
                                             readOnly = true,
-                                            modifier = textModifier
+                                            modifier = Modifier
+                                                .defaultMinSize(
+                                                    Dp.Unspecified,
+                                                    50.dp
+                                                )
+                                                .wrapContentHeight()
                                         )
                                     }
                                 }
