@@ -65,11 +65,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.text.newtextviewer.ui.theme.NewTextViewerTheme
 import kotlinx.coroutines.launch
 
-const val CHUNK_SIZE = 65536
+const val CHUNK_SIZE = 1048576
 
-const val KEYWORD_LENGTH = 256
+const val KEYWORD_LENGTH = 1024
 
-const val WRAP_LENGTH = 256
+const val WRAP_LENGTH = 1024
 
 val CHARSETS = arrayOf(
     Charsets.ISO_8859_1,
@@ -263,9 +263,13 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                             else {
                                                 val lazyListState = viewModel.lazyListStateInfo[viewModel.currentFileIndex]
                                                 val currentLine = viewModel.baseLineNumber + lazyListState.firstVisibleItemIndex
+                                                var startLine = currentLine
+                                                if (inputKeyword == viewModel.findKeywordInfo.keyword) {
+                                                    startLine = 0
+                                                }
                                                 viewModel.findKeywordInfo = FindKeywordInfo(
                                                     inputKeyword,
-                                                    WordPos(currentLine, -1)
+                                                    WordPos(startLine, -1)
                                                 )
                                             }
                                             readTextFlag = true
