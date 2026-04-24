@@ -11,8 +11,9 @@ import androidx.lifecycle.ViewModel
 import java.nio.charset.Charset
 
 data class FileReadInfo(
-    val uri: Uri,
+    var uri: Uri,
     var fileName: String,
+    var fileSize: Int,
     var charset: Charset
 )
 
@@ -40,6 +41,14 @@ class TextViewerViewModel : ViewModel() {
 
     var chunkNumberInfo = arrayListOf<Int>()
 
+    var text by mutableStateOf("")
+
+    var treeUri: Uri? = null
+
+    var treeSelectedFlag by mutableStateOf(false)
+
+    var lazyListState by mutableStateOf(LazyListState())
+
     val lines = mutableStateListOf<String>()
 
     val expandedList = mutableStateListOf<Boolean>()
@@ -52,7 +61,9 @@ class TextViewerViewModel : ViewModel() {
 
     var findKeywordStart = WordPos(-1, -1)
 
-    var helpFlag by mutableStateOf(false)
+    var settingFlag by mutableStateOf(false)
+
+    var editLineNumberFlag by mutableStateOf(false)
 
     var menuFlag by mutableStateOf(false)
 
@@ -67,6 +78,8 @@ class TextViewerViewModel : ViewModel() {
     var moveForward by mutableStateOf(false)
 
     var moveBackward by mutableStateOf(false)
+
+    var editFlag by mutableStateOf(false)
 
     var keywordLine = -1
 
