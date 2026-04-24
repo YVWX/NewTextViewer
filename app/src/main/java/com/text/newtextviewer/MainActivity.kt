@@ -2,10 +2,12 @@ package com.text.newtextviewer
 
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,11 +29,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -44,32 +47,41 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.text.isDigitsOnly
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.text.newtextviewer.ui.theme.NewTextViewerTheme
 import kotlinx.coroutines.launch
+import java.io.File
+import kotlin.math.min
 
-const val CHUNK_SIZE = 1048576
+const val CHUNK_SIZE = 65536
 
-const val KEYWORD_LENGTH = 1024
+const val KEYWORD_LENGTH = 256
 
-const val WRAP_LENGTH = 1024
+const val WRAP_LENGTH = 256
 
 val CHARSETS = arrayOf(
     Charsets.ISO_8859_1,
@@ -83,7 +95,7 @@ val CHARSETS = arrayOf(
     Charsets.UTF_8
 )
 
-const val HELP_INFO = "The lines too long will be wrapped automatically and they cannot be unwrapped"
+const val HELP_INFO = "The lines too long will be wrapped automatically and they cannot be unwrapped. The edit mode saves files automatically as ntv_XXX.YYY to avoid the file loss."
 
 
 class MainActivity : ComponentActivity() {
@@ -116,21 +128,24 @@ fun countOccurrences(text: String, target: String): Int {
 @Composable
 fun LineLeadingIcon(index: Int, expandEnable: Boolean, viewModel: TextViewerViewModel) {
     val lineNumber = viewModel.baseLineNumber + index + 1
+    val textSize = with(LocalDensity.current) { 24.sp.toDp() }
     Row {
         Box {
             Text(
                 text = lineNumber.toString(),
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .defaultMinSize(50.dp, 50.dp)
-                    .wrapContentHeight()
+                    .height(textSize)
+                    .defaultMinSize(textSize, textSize)
+                    .wrapContentHeight(),
+                style = TextStyle(fontSize = 16.sp)
             )
         }
         IconButton(
             onClick = {
                 viewModel.expandedList[index] = !viewModel.expandedList[index]
             },
-            modifier = Modifier.height(50.dp),
+            modifier = Modifier.height(textSize),
             enabled = expandEnable
         ) {
             if (viewModel.expandedList[index]) {
@@ -165,30 +180,134 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
 
     var readTextFlag by remember { mutableStateOf(false) }
 
+    var writeFlag by remember { mutableStateOf(false) }
+
     var scrollFlag by remember { mutableStateOf(false) }
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+    var syncEditFlag by remember { mutableStateOf(false) }
+
+    val textSizeDp = with(LocalDensity.current) { 24.sp.toDp() }
+    val textSizePx = with(LocalDensity.current) { 24.sp.roundToPx() }
+
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) {
+        if (it != null) {
+            viewModel.treeUri = it
+            viewModel.treeSelectedFlag = true
+        }
+    }
+
+    val newLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) {
             val cursor = context.contentResolver.query(it, null, null, null, null)
             var fileName = ""
+            var fileSize = 0
             if (cursor != null) {
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 cursor.moveToFirst()
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 fileName = cursor.getString(nameIndex)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                fileSize = cursor.getInt(sizeIndex)
                 cursor.close()
             }
 
-            viewModel.fileReadInfo.add(FileReadInfo(it, fileName, Charsets.UTF_8))
+            viewModel.fileReadInfo.add(
+                FileReadInfo(
+                    it,
+                    fileName,
+                    fileSize,
+                    Charsets.UTF_8
+                )
+            )
             viewModel.currentChunkInfo.add(0)
             viewModel.chunkNumberInfo.add(0)
-            viewModel.currentFileIndex = viewModel.fileReadInfo.size - 1
             newFileFlag = true
         }
     }
 
     if (newFileFlag) {
         viewModel.lazyListStateInfo.add(rememberLazyListState())
+        viewModel.currentFileIndex = viewModel.fileReadInfo.size - 1
         newFileFlag = false
+        readTextFlag = true
+    }
+
+    if (writeFlag && viewModel.treeSelectedFlag) {
+        writeFlag = false
+
+        val treeDocumentFile = viewModel.treeUri?.let { DocumentFile.fromTreeUri(context, it) }
+
+        val inputStream = context.contentResolver.openInputStream(viewModel.fileReadInfo[viewModel.currentFileIndex].uri)
+        val tempFile = File(context.filesDir, "temp.txt")
+
+        if (inputStream != null) {
+            val bufferedReader = inputStream.bufferedReader(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
+            val bufferedWriter = tempFile.bufferedWriter(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
+
+            var chunkCount = 0
+            val skipSize = CHUNK_SIZE / 2
+
+            while (bufferedReader.ready()) {
+                val buffer = CharArray(CHUNK_SIZE)
+                val actualLength = bufferedReader.read(buffer, 0, skipSize)
+
+                if (chunkCount < viewModel.currentChunkInfo[viewModel.currentFileIndex] || chunkCount > viewModel.currentChunkInfo[viewModel.currentFileIndex] + 1) {
+                    bufferedWriter.write(buffer, 0, actualLength)
+                }
+                else if (chunkCount == viewModel.currentChunkInfo[viewModel.currentFileIndex]) {
+                    bufferedWriter.write(viewModel.text)
+                }
+
+                chunkCount++
+            }
+
+            bufferedReader.close()
+            bufferedWriter.close()
+        }
+
+        if (treeDocumentFile != null) {
+            var writeFileName = viewModel.fileReadInfo[viewModel.currentFileIndex].fileName
+            if (!writeFileName.startsWith("ntv_")) {
+                writeFileName = "ntv_$writeFileName"
+            }
+            var documentFile = treeDocumentFile.findFile(writeFileName)
+            documentFile?.delete()
+            documentFile = treeDocumentFile.createFile(
+                "text/*",
+                writeFileName
+            )
+
+            val fileUri = documentFile?.uri
+
+            if (fileUri != null) {
+                val outputStream = context.contentResolver.openOutputStream(fileUri)
+
+                if (outputStream != null) {
+                    val bufferedReader = tempFile.bufferedReader(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
+                    val bufferedWriter = outputStream.bufferedWriter(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
+
+                    var chunkCount = 0
+                    val skipSize = CHUNK_SIZE / 2
+
+                    while (bufferedReader.ready()) {
+                        val buffer = CharArray(CHUNK_SIZE)
+                        val actualLength = bufferedReader.read(buffer, 0, skipSize)
+
+                        bufferedWriter.write(buffer, 0, actualLength)
+                        println(buffer.slice(0..<actualLength).toString())
+
+                        chunkCount++
+                    }
+
+                    bufferedReader.close()
+                    bufferedWriter.close()
+
+                    viewModel.fileReadInfo[viewModel.currentFileIndex].uri = fileUri
+                }
+            }
+        }
+
+        tempFile.delete()
+
         readTextFlag = true
     }
 
@@ -199,22 +318,10 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                 title = {
                     Row {
                         IconButton(
-                            onClick = {
-                                viewModel.helpFlag = true
-                            },
+                            onClick = { viewModel.settingFlag = true },
                             modifier = Modifier.fillMaxHeight()
                         ) {
-                            Icon(Icons.Filled.Info, null)
-                        }
-                        if (viewModel.currentFileIndex != -1) {
-                            Button(
-                                onClick = {
-                                    viewModel.expandAll()
-                                },
-                                modifier = Modifier.fillMaxHeight()
-                            ) {
-                                Text("expand all")
-                            }
+                            Icon(Icons.Filled.Settings, null)
                         }
                     }
                 },
@@ -321,10 +428,11 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                             }
                         )
                     }
-                    else {
+                    else if (!viewModel.editFlag) {
+                        val shorterWidth = min(configuration.screenWidthDp, configuration.screenHeightDp)
                         IconButton(
                             onClick = {
-                                launcher.launch(
+                                newLauncher.launch(
                                     arrayOf(
                                         "text/*",
                                         "application/xml",
@@ -334,7 +442,9 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                     )
                                 )
                             },
-                            modifier = Modifier.fillMaxHeight()
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(shorterWidth.dp / 12)
                         ) {
                             Icon(Icons.Filled.Add, null)
                         }
@@ -343,7 +453,9 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                 onClick = {
                                     viewModel.menuFlag = true
                                 },
-                                modifier = Modifier.fillMaxHeight()
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(shorterWidth.dp / 12)
                             ) {
                                 Icon(Icons.Filled.Menu, null)
                             }
@@ -351,15 +463,18 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                 onClick = {
                                     viewModel.charsetFlag = true
                                 },
-                                modifier = Modifier.fillMaxHeight()
+                                modifier = Modifier
+                                    .fillMaxHeight()
                             ) {
-                                Text("encoding")
+                                Text("encode")
                             }
                             IconButton(
                                 onClick = {
                                     viewModel.findFlag = true
                                 },
-                                modifier = Modifier.fillMaxHeight()
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(shorterWidth.dp / 12)
                             ) {
                                 Icon(Icons.Filled.Search, null)
                             }
@@ -367,10 +482,55 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                 onClick = {
                                     viewModel.gotoFlag = true
                                 },
-                                modifier = Modifier.fillMaxHeight()
+                                modifier = Modifier
+                                    .fillMaxHeight()
                             ) {
                                 Text("Go to line")
                             }
+                            IconButton(
+                                onClick = {
+                                    viewModel.collapseAll()
+                                    viewModel.editFlag = true
+                                },
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(shorterWidth.dp / 12)
+                            ) {
+                                Icon(Icons.Filled.Edit, null)
+                            }
+                        }
+                    }
+                    else if (!viewModel.editLineNumberFlag) {
+                        Button(
+                            onClick = {
+                                viewModel.gotoLine = viewModel.baseLineNumber + viewModel.lazyListState.firstVisibleItemScrollOffset / textSizePx
+                                readTextFlag = true
+                                viewModel.editFlag = false
+                            },
+                            modifier = Modifier.fillMaxHeight()
+                        ) {
+                            Text("discard")
+                        }
+                        Button(
+                            onClick = {
+                                if (viewModel.treeUri == null) {
+                                    treeLauncher.launch(null)
+                                }
+                                writeFlag = true
+                                viewModel.gotoLine = viewModel.baseLineNumber + viewModel.lazyListState.firstVisibleItemScrollOffset / textSizePx
+                                viewModel.editFlag = false
+                            },
+                            modifier = Modifier.fillMaxHeight()
+                        ) {
+                            Text("save")
+                        }
+                        Button(
+                            onClick = {
+                                treeLauncher.launch(null)
+                            },
+                            modifier = Modifier.fillMaxHeight()
+                        ) {
+                            Text("saving place")
                         }
                     }
                 },
@@ -379,15 +539,43 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
         }
     )
     { innerPadding ->
-        if (viewModel.helpFlag) {
-            Dialog(onDismissRequest = { viewModel.helpFlag = false }) {
+        if (viewModel.settingFlag) {
+            Dialog(onDismissRequest = { viewModel.settingFlag = false }) {
                 LazyColumn {
                     item {
                         TextField(
                             value = HELP_INFO,
                             onValueChange = {},
-                            readOnly = true
+                            readOnly = true,
+                            modifier = Modifier.fillMaxWidth(0.875F)
                         )
+                    }
+                    if (viewModel.currentFileIndex != -1 && !viewModel.editFlag) {
+                        item {
+                            Button(
+                                onClick = {
+                                    viewModel.expandAll()
+                                    viewModel.settingFlag = false
+                                },
+                                modifier = Modifier.fillMaxWidth(0.875F)
+                            ) {
+                                Text("expand all")
+                            }
+                        }
+                    }
+                    else if (viewModel.currentFileIndex != -1 && viewModel.editFlag) {
+                        val lineNumberText = if (viewModel.editLineNumberFlag) "hide line number" else "show line number"
+                        item {
+                            Button(
+                                onClick = {
+                                    viewModel.expandAll()
+                                    viewModel.editLineNumberFlag = !viewModel.editLineNumberFlag
+                                },
+                                modifier = Modifier.fillMaxWidth(0.875F)
+                            ) {
+                                Text(lineNumberText)
+                            }
+                        }
                     }
                 }
             }
@@ -518,6 +706,24 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
         }
 
         if (readTextFlag) {
+            val cursor = context.contentResolver.query(viewModel.fileReadInfo[viewModel.currentFileIndex].uri, null, null, null, null)
+            if (cursor != null) {
+                cursor.moveToFirst()
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                viewModel.fileReadInfo[viewModel.currentFileIndex].fileName = cursor.getString(nameIndex)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize = cursor.getInt(sizeIndex)
+                cursor.close()
+            }
+
+            if (viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize > 1000 * 1000) {
+                val sizeMB = viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize.toDouble() / 1000 / 1000
+                val estimatedTime = sizeMB / 1000 * 160
+                val loadingInfo = "File size: " + "%.2f".format(sizeMB) + "MB. Take approx " + "%.2f".format(estimatedTime) + "s."
+                val toast = Toast.makeText(context, loadingInfo, Toast.LENGTH_LONG)
+                toast.show()
+            }
+
             val stream = context.contentResolver.openInputStream(viewModel.fileReadInfo[viewModel.currentFileIndex].uri)
             if (stream == null && viewModel.gotoLine != -1) {
                 viewModel.gotoLine = -1
@@ -532,6 +738,7 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                 var currentIndex = -1
                 var matchCount = 0
                 val skipSize = CHUNK_SIZE / 2
+                var text: String
 
                 var readSize = skipSize
                 if (viewModel.findKeywordInfo.keyword.length > 0) {
@@ -544,7 +751,7 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                     bufferedReader.mark(readSize)
                     val buffer = CharArray(CHUNK_SIZE)
                     var actualLength = bufferedReader.read(buffer, 0, readSize)
-                    var text = String(buffer.sliceArray(0..<actualLength))
+                    text = String(buffer.sliceArray(0..<actualLength))
                     bufferedReader.reset()
 
                     var actualSkipSize = skipSize
@@ -593,10 +800,9 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                         viewModel.clearLineInfo()
                         bufferedReader.mark(CHUNK_SIZE)
                         actualLength = bufferedReader.read(buffer, 0, CHUNK_SIZE)
-                        text = String(buffer.sliceArray(0..<actualLength))
+                        viewModel.text = String(buffer.sliceArray(0..<actualLength))
                         bufferedReader.reset()
-                        lines = text.lines()
-
+                        lines = viewModel.text.lines()
                         for (line in lines) {
                             viewModel.addLineInfo(line, false)
                         }
@@ -642,9 +848,65 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
             }
         }
 
-        if (viewModel.currentFileIndex != -1) {
-            val coroutineScope = rememberCoroutineScope()
+        val coroutineScope = rememberCoroutineScope()
 
+        if (viewModel.editFlag) {
+            viewModel.lazyListState = rememberLazyListState()
+            val focusRequester = remember { FocusRequester() }
+
+            LazyRow(
+                modifier = Modifier.padding(innerPadding),
+            ) {
+                item {
+                    LazyColumn(
+                        state = viewModel.lazyListState,
+                    ) {
+                        var displayText = viewModel.text
+                        var readOnlyFlag = false
+                        if (viewModel.editLineNumberFlag) {
+                            val lines = viewModel.text.lines()
+                            var finalText = ""
+                            for (index in lines.indices) {
+                                val lineNumber = viewModel.baseLineNumber + index + 1
+                                finalText += lineNumber.toString() + " " + lines[index] + "\n"
+                            }
+                            displayText = finalText.slice(0..<finalText.length - 1)
+                            readOnlyFlag = true
+                        }
+                        item {
+                            BasicTextField(
+                                value = displayText,
+                                onValueChange = {
+                                    viewModel.text = it
+                                },
+                                modifier = Modifier
+                                    .defaultMinSize(
+                                        configuration.screenWidthDp.dp,
+                                        Dp.Unspecified
+                                    )
+                                    .focusRequester(focusRequester),
+                                textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
+                                readOnly = readOnlyFlag
+                            )
+                            LaunchedEffect(Unit) {
+                                focusRequester.requestFocus()
+                                syncEditFlag = true
+                            }
+                        }
+                    }
+                    LaunchedEffect(syncEditFlag) {
+                        if (syncEditFlag) {
+                            syncEditFlag = false
+                            val scrollOffset = textSizePx * viewModel.lazyListStateInfo[viewModel.currentFileIndex].firstVisibleItemIndex
+                            coroutineScope.launch {
+                                viewModel.lazyListState.scrollBy(scrollOffset.toFloat())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (viewModel.currentFileIndex != -1) {
             LazyRow(
                 modifier = Modifier.padding(innerPadding)
             ) {
@@ -676,10 +938,13 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                             var textModifier = Modifier
                                 .defaultMinSize(
                                     configuration.screenWidthDp.dp,
-                                    50.dp
+                                    textSizeDp
                                 )
                             if (viewModel.expandedList[index]) {
                                 textModifier = textModifier.width(configuration.screenWidthDp.dp)
+                            }
+                            else {
+                                textModifier = textModifier.height(textSizeDp)
                             }
                             Row(
                                 modifier = textModifier
@@ -706,9 +971,10 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                             modifier = Modifier
                                                 .defaultMinSize(
                                                     Dp.Unspecified,
-                                                    50.dp
+                                                    textSizeDp
                                                 )
-                                                .wrapContentHeight()
+                                                .wrapContentHeight(),
+                                            textStyle = TextStyle(fontSize = 16.sp)
                                         )
                                     } else {
                                         BasicTextField(
@@ -718,14 +984,17 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                             modifier = Modifier
                                                 .defaultMinSize(
                                                     Dp.Unspecified,
-                                                    50.dp
+                                                    textSizeDp
                                                 )
-                                                .wrapContentHeight()
+                                                .wrapContentHeight(),
+                                            textStyle = TextStyle(fontSize = 16.sp)
                                         )
                                     }
                                 }
                             }
                         }
+                    }
+                    LaunchedEffect(scrollFlag) {
                         if (scrollFlag) {
                             scrollFlag = false
                             coroutineScope.launch {
@@ -749,7 +1018,7 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
 
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun ViewerPreview() {
     NewTextViewerTheme {
         Main()
     }
