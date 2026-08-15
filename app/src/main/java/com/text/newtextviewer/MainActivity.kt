@@ -559,7 +559,7 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
                                 },
                                 modifier = Modifier.fillMaxWidth(0.875F)
                             ) {
-                                Text("expand all")
+                                Text("expand all lines")
                             }
                         }
                     }
