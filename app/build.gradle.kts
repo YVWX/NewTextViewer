@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.text.newtextviewer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.text.newtextviewer"
         minSdk = 21
-        targetSdk = 35
-        versionCode = 9
-        versionName = "2.0"
+        targetSdk = 36
+        versionCode = 10
+        versionName = "2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
