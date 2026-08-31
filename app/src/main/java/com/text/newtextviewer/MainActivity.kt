@@ -539,6 +539,16 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
         }
     )
     { innerPadding ->
+        if (viewModel.loadingFlag) {
+            Dialog(onDismissRequest = {}) {
+                TextField(
+                    value = "Loading..." + viewModel.loadingText,
+                    onValueChange = {},
+                    readOnly = true,
+                    modifier = Modifier.fillMaxWidth(0.875F)
+                )
+            }
+        }
         if (viewModel.settingFlag) {
             Dialog(onDismissRequest = { viewModel.settingFlag = false }) {
                 LazyColumn {
@@ -705,150 +715,160 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
             }
         }
 
-        if (readTextFlag) {
-            val cursor = context.contentResolver.query(viewModel.fileReadInfo[viewModel.currentFileIndex].uri, null, null, null, null)
-            if (cursor != null) {
-                cursor.moveToFirst()
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                viewModel.fileReadInfo[viewModel.currentFileIndex].fileName = cursor.getString(nameIndex)
-                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize = cursor.getInt(sizeIndex)
-                cursor.close()
-            }
+        val coroutineScope = rememberCoroutineScope()
 
-            if (viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize > 1000 * 1000) {
-                val sizeMB = viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize.toDouble() / 1000 / 1000
-                val estimatedTime = sizeMB / 1000 * 160
-                val loadingInfo = "File size: " + "%.2f".format(sizeMB) + "MB. Take approx " + "%.2f".format(estimatedTime) + "s."
-                val toast = Toast.makeText(context, loadingInfo, Toast.LENGTH_LONG)
-                toast.show()
-            }
-
-            val stream = context.contentResolver.openInputStream(viewModel.fileReadInfo[viewModel.currentFileIndex].uri)
-            if (stream == null && viewModel.gotoLine != -1) {
-                viewModel.gotoLine = -1
-            }
-            readTextFlag = false
-
-            if (stream != null && viewModel.currentChunkInfo[viewModel.currentFileIndex] != -1) {
-                val bufferedReader = stream.bufferedReader(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
-
-                var lineCount = 0
-                var chunkCount = 0
-                var currentIndex = -1
-                var matchCount = 0
-                val skipSize = CHUNK_SIZE / 2
-                var text: String
-
-                var readSize = skipSize
-                if (viewModel.findKeywordInfo.keyword.length > 0) {
-                    readSize += viewModel.findKeywordInfo.keyword.length - 1
+        LaunchedEffect(readTextFlag) {
+            if (readTextFlag) {
+                val cursor = context.contentResolver.query(viewModel.fileReadInfo[viewModel.currentFileIndex].uri, null, null, null, null)
+                if (cursor != null) {
+                    cursor.moveToFirst()
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    viewModel.fileReadInfo[viewModel.currentFileIndex].fileName = cursor.getString(nameIndex)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize = cursor.getInt(sizeIndex)
+                    cursor.close()
                 }
-                var foundFlag = false
-                var firstFlag = true
 
-                while (bufferedReader.ready()) {
-                    bufferedReader.mark(readSize)
-                    val buffer = CharArray(CHUNK_SIZE)
-                    var actualLength = bufferedReader.read(buffer, 0, readSize)
-                    text = String(buffer.sliceArray(0..<actualLength))
-                    bufferedReader.reset()
+                if (viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize > 1000 * 1000) {
+                    val sizeMB = viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize.toDouble() / 1000 / 1000
+                    val estimatedTime = sizeMB / 1000 * 160
+                    val loadingInfo = "File size: " + "%.2f".format(sizeMB) + "MB. Take approx " + "%.2f".format(estimatedTime) + "s."
+                    viewModel.loadingText = loadingInfo
+                    val toast = Toast.makeText(context, loadingInfo, Toast.LENGTH_LONG)
+                    toast.show()
+                    viewModel.loadingFlag = true
+                }
 
-                    var actualSkipSize = skipSize
-                    if (actualLength < actualSkipSize) {
-                        actualSkipSize = actualLength
+                val stream = context.contentResolver.openInputStream(viewModel.fileReadInfo[viewModel.currentFileIndex].uri)
+                if (stream == null && viewModel.gotoLine != -1) {
+                    viewModel.gotoLine = -1
+                }
+                readTextFlag = false
+
+                if (stream != null && viewModel.currentChunkInfo[viewModel.currentFileIndex] != -1) {
+                    val bufferedReader = stream.bufferedReader(charset = viewModel.fileReadInfo[viewModel.currentFileIndex].charset)
+
+                    var lineCount = 0
+                    var chunkCount = 0
+                    var currentIndex = -1
+                    var matchCount = 0
+                    val skipSize = CHUNK_SIZE / 2
+                    var text: String
+
+                    var readSize = skipSize
+                    if (viewModel.findKeywordInfo.keyword.length > 0) {
+                        readSize += viewModel.findKeywordInfo.keyword.length - 1
                     }
-                    var lines = text.substring(0..<actualSkipSize).lines()
-                    val chunkLineNumber = lines.size
+                    var foundFlag = false
+                    var firstFlag = true
 
-                    lines = text.lines()
-                    if (viewModel.gotoLine != -1 && lineCount + lines.size >= viewModel.gotoLine) {
-                        foundFlag = true
-                    }
-                    else if (viewModel.findKeywordInfo.keyword != "") {
-                        for (index in lines.indices) {
-                            val count = countOccurrences(lines[index], viewModel.findKeywordInfo.keyword)
-                            matchCount += count
-                            if (!foundFlag && lineCount + index >= viewModel.findKeywordInfo.startPos.line && count > 0) {
-                                var startOffset = 0
-                                if (lineCount + index == viewModel.findKeywordInfo.startPos.line) {
-                                    startOffset = viewModel.findKeywordInfo.startPos.offset + 1
-                                }
-                                val offset = lines[index].indexOf(
-                                    viewModel.findKeywordInfo.keyword,
-                                    startOffset
+                    while (bufferedReader.ready()) {
+                        bufferedReader.mark(readSize)
+                        val buffer = CharArray(CHUNK_SIZE)
+                        var actualLength = bufferedReader.read(buffer, 0, readSize)
+                        text = String(buffer.sliceArray(0..<actualLength))
+                        bufferedReader.reset()
+
+                        var actualSkipSize = skipSize
+                        if (actualLength < actualSkipSize) {
+                            actualSkipSize = actualLength
+                        }
+                        var lines = text.substring(0..<actualSkipSize).lines()
+                        val chunkLineNumber = lines.size
+
+                        lines = text.lines()
+                        if (viewModel.gotoLine != -1 && lineCount + lines.size >= viewModel.gotoLine) {
+                            foundFlag = true
+                        } else if (viewModel.findKeywordInfo.keyword != "") {
+                            for (index in lines.indices) {
+                                val count = countOccurrences(
+                                    lines[index],
+                                    viewModel.findKeywordInfo.keyword
                                 )
-                                if (offset != -1) {
-                                    val afterMatchNumber = countOccurrences(
-                                        lines[index].substring(startOffset..<lines[index].length),
-                                        viewModel.findKeywordInfo.keyword
+                                matchCount += count
+                                if (!foundFlag && lineCount + index >= viewModel.findKeywordInfo.startPos.line && count > 0) {
+                                    var startOffset = 0
+                                    if (lineCount + index == viewModel.findKeywordInfo.startPos.line) {
+                                        startOffset =
+                                            viewModel.findKeywordInfo.startPos.offset + 1
+                                    }
+                                    val offset = lines[index].indexOf(
+                                        viewModel.findKeywordInfo.keyword,
+                                        startOffset
                                     )
-                                    currentIndex = matchCount - afterMatchNumber + 1
-                                    viewModel.keywordLine = lineCount + index
-                                    viewModel.findKeywordStart = WordPos(lineCount + index, offset)
-                                    foundFlag = true
+                                    if (offset != -1) {
+                                        val afterMatchNumber = countOccurrences(
+                                            lines[index].substring(startOffset..<lines[index].length),
+                                            viewModel.findKeywordInfo.keyword
+                                        )
+                                        currentIndex = matchCount - afterMatchNumber + 1
+                                        viewModel.keywordLine = lineCount + index
+                                        viewModel.findKeywordStart =
+                                            WordPos(lineCount + index, offset)
+                                        foundFlag = true
+                                    }
                                 }
                             }
+                        } else if (viewModel.gotoLine == -1 && chunkCount == viewModel.currentChunkInfo[viewModel.currentFileIndex]) {
+                            foundFlag = true
                         }
-                    }
-                    else if (viewModel.gotoLine == -1 && chunkCount == viewModel.currentChunkInfo[viewModel.currentFileIndex]) {
-                        foundFlag = true
-                    }
-                    if (foundFlag && firstFlag) {
-                        viewModel.currentChunkInfo[viewModel.currentFileIndex] = chunkCount
+                        if (foundFlag && firstFlag) {
+                            viewModel.currentChunkInfo[viewModel.currentFileIndex] = chunkCount
 
-                        viewModel.clearLineInfo()
-                        bufferedReader.mark(CHUNK_SIZE)
-                        actualLength = bufferedReader.read(buffer, 0, CHUNK_SIZE)
-                        viewModel.text = String(buffer.sliceArray(0..<actualLength))
-                        bufferedReader.reset()
-                        lines = viewModel.text.lines()
-                        for (line in lines) {
-                            viewModel.addLineInfo(line, false)
-                        }
+                            viewModel.clearLineInfo()
+                            bufferedReader.mark(CHUNK_SIZE)
+                            actualLength = bufferedReader.read(buffer, 0, CHUNK_SIZE)
+                            viewModel.text = String(buffer.sliceArray(0..<actualLength))
+                            bufferedReader.reset()
+                            lines = viewModel.text.lines()
+                            for (line in lines) {
+                                viewModel.addLineInfo(line, false)
+                            }
 
-                        viewModel.baseLineNumber = lineCount
+                            viewModel.baseLineNumber = lineCount
 
-                        firstFlag = false
-                    }
-                    bufferedReader.skip(skipSize.toLong())
-                    // the number of line breaks (new lines)
-                    lineCount += chunkLineNumber - 1
-                    chunkCount++
-                }
-                if (foundFlag) {
-                    viewModel.chunkNumberInfo[viewModel.currentFileIndex] = chunkCount
-                    if (viewModel.gotoLine != -1) {
-                        scrollFlag = true
-                    }
-                    if (viewModel.findKeywordInfo.keyword != "") {
-                        viewModel.occurrenceInfo = OccurrenceInfo(currentIndex, matchCount)
-                        scrollFlag = true
-                    }
-                    if (viewModel.keepPosLine != -1) {
-                        if (viewModel.keepPosLine >= viewModel.baseLineNumber) {
-                            viewModel.gotoLine = viewModel.keepPosLine
+                            firstFlag = false
                         }
-                        else {
-                            viewModel.gotoLine = viewModel.baseLineNumber
+                        bufferedReader.skip(skipSize.toLong())
+                        // the number of line breaks (new lines)
+                        lineCount += chunkLineNumber - 1
+                        chunkCount++
+                    }
+                    if (foundFlag) {
+                        viewModel.chunkNumberInfo[viewModel.currentFileIndex] = chunkCount
+                        if (viewModel.gotoLine != -1) {
+                            scrollFlag = true
                         }
-                        scrollFlag = true
-                        viewModel.keepPosLine = -1
+                        if (viewModel.findKeywordInfo.keyword != "") {
+                            viewModel.occurrenceInfo = OccurrenceInfo(currentIndex, matchCount)
+                            scrollFlag = true
+                        }
+                        if (viewModel.keepPosLine != -1) {
+                            if (viewModel.keepPosLine >= viewModel.baseLineNumber) {
+                                viewModel.gotoLine = viewModel.keepPosLine
+                            } else {
+                                viewModel.gotoLine = viewModel.baseLineNumber
+                            }
+                            scrollFlag = true
+                            viewModel.keepPosLine = -1
+                        }
+                    } else {
+                        if (viewModel.gotoLine != -1) {
+                            viewModel.gotoLine = -1
+                        }
+                        if (viewModel.findKeywordInfo.keyword != "") {
+                            viewModel.occurrenceInfo = OccurrenceInfo(0, matchCount)
+                        }
                     }
+                    bufferedReader.close()
                 }
-                else {
-                    if (viewModel.gotoLine != -1) {
-                        viewModel.gotoLine = -1
-                    }
-                    if (viewModel.findKeywordInfo.keyword != "") {
-                        viewModel.occurrenceInfo = OccurrenceInfo(0, matchCount)
-                    }
+
+                if (viewModel.loadingFlag) {
+                    viewModel.loadingFlag = false
+                    viewModel.loadingText = ""
                 }
-                bufferedReader.close()
             }
         }
-
-        val coroutineScope = rememberCoroutineScope()
 
         if (viewModel.editFlag) {
             viewModel.lazyListState = rememberLazyListState()

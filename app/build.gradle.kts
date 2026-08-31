@@ -11,8 +11,8 @@ android {
         applicationId = "com.text.newtextviewer"
         minSdk = 21
         targetSdk = 36
-        versionCode = 10
-        versionName = "2.1"
+        versionCode = 15
+        versionName = "2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -23,6 +23,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

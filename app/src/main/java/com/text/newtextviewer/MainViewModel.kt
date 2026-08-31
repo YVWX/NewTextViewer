@@ -61,6 +61,10 @@ class TextViewerViewModel : ViewModel() {
 
     var findKeywordStart = WordPos(-1, -1)
 
+    var loadingFlag by mutableStateOf(false)
+
+    var loadingText = ""
+
     var settingFlag by mutableStateOf(false)
 
     var editLineNumberFlag by mutableStateOf(false)
