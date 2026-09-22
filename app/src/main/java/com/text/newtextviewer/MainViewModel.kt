@@ -63,6 +63,8 @@ class TextViewerViewModel : ViewModel() {
 
     var loadingFlag by mutableStateOf(false)
 
+    var estimatedTime: Double = 0.0
+
     var loadingText = ""
 
     var settingFlag by mutableStateOf(false)

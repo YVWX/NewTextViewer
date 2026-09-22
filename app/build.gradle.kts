@@ -11,8 +11,8 @@ android {
         applicationId = "com.text.newtextviewer"
         minSdk = 21
         targetSdk = 36
-        versionCode = 15
-        versionName = "2.5"
+        versionCode = 18
+        versionName = "2.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
