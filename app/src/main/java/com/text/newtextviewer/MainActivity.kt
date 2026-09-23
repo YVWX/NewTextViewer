@@ -1,5 +1,7 @@
 package com.text.newtextviewer
 
+import android.icu.util.Calendar
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -7,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,7 +80,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.time.LocalDateTime
+import java.util.Date
 import kotlin.math.min
 
 const val CHUNK_SIZE = 65536
@@ -240,7 +246,7 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
         if (writeFlag && viewModel.treeSelectedFlag) {
             writeFlag = false
 
-            if (viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize > 0) {//1000 * 1000) {
+            if (viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize > 1000 * 1000) {
                 val sizeMB = viewModel.fileReadInfo[viewModel.currentFileIndex].fileSize.toDouble() / 1000 / 1000
                 val estimatedTime = sizeMB / 1000 * 160
                 val loadingInfo =
@@ -505,10 +511,11 @@ fun Main(modifier: Modifier = Modifier, viewModel: TextViewerViewModel = viewMod
 
     if (viewModel.loadingFlag) {
         Dialog(onDismissRequest = {}) {
-            val currentTime = LocalDateTime.now()
-            val expectedTime = currentTime.plusSeconds(viewModel.estimatedTime.toLong() + 1)
+            val currentTime = Date()
+            val expectedTime = currentTime.time + 1000 * (viewModel.estimatedTime.toLong() + 1)
+            val timeFormatter = SimpleDateFormat.getTimeInstance()
             val loadingDetail = "Loading..." + viewModel.loadingText + "\n" +
-                    "Expected finish time: $expectedTime."
+                    "Expected finish time: ${timeFormatter.format(expectedTime)}."
             TextField(
                 value = loadingDetail,
                 onValueChange = {},

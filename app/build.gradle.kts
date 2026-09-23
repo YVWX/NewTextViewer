@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "com.text.newtextviewer"
-        minSdk = 21
+        minSdk = 23
         targetSdk = 36
-        versionCode = 18
-        versionName = "2.8"
+        versionCode = 20
+        versionName = "2.10"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
